@@ -5,11 +5,10 @@ import time
 import sched
 import discord
 from discord.ext import commands
-import aiocron
 import re
 
-from pillbottle import getAction
-from pillbottle.classes import Action, RegexChecker, DateChecker
+#from pillbottle import getAction
+from pillbottle.classes import RegexChecker, DateChecker
 from pillbottle.schema import Session, CronEntry, Channel
 from sqlalchemy.orm import aliased
 
@@ -89,9 +88,9 @@ async def on_ready():
     .join(uchannels, CronEntry.channelid == uchannels.id)\
     .join(echannels, CronEntry.echannel == echannels.id):
         
-        a = await getAction(entry, bot, serverid)
-        cron = aiocron.crontab(entry.cron, func=a, loop=bot.loop)
-        entries[entry.id] = {"action": a, "cron": cron}
+        entries[entry.id] = entry
+        entry.bot = bot
+        entry.schedule()
         
     print(entries)
     
@@ -153,14 +152,34 @@ async def remind(ctx, *args, **kwargs):
             
             dest_channel = possible_channels[int(reply.content)]
             
-            a = Action(ctx.bot, ctx.message.author, message, everyone=dest_channel)
-            cron = aiocron.crontab(entry, func=a, loop=ctx.bot.loop)
-            centry = a.getDbObj(db)
-            centry.cron = entry
+            #a = Action(ctx.bot, ctx.message.author, message, everyone=dest_channel)
+            #cron = aiocron.crontab(entry, func=a, loop=ctx.bot.loop)
+            #centry = a.getDbObj(db)
+            
+            uchan = db.query(Channel).filter_by(id=ctx.message.author.id).first()
+            if uchan is None:
+                uchan = Channel(id=ctx.message.author.id, serverid=None)
+                db.add(uchan)
+                
+            echan = db.query(Channel).filter_by(id=dest_channel.id).first()
+            if echan is None:
+                echan = Channel(id=dest_channel.id, serverid=dest_channel.server.id)
+                db.add(echan)
+                
+            centry = CronEntry(channelid=uchan.id, 
+            message=message, 
+            timeout=900, 
+            requestcount=3, 
+            echannel=echan.id, 
+            response="Thank you!",
+            cron=entry)
+            
             db.add(centry)
             db.commit()
             
-            entries[centry.id] = {"action": a, "cron": cron}
+            centry.bot = ctx.bot
+            centry.schedule()
+            entries[centry.id] = centry
             
             await ctx.bot.send_message(ctx.message.channel, "Reminder set! ({})".format(centry.id))    
 
@@ -257,10 +276,10 @@ async def schedule(ctx, *args, **kwargs):
     
     for (entry, userid, channelid, serverid) in dbentries:
         if entry is not None and entry.id in entries:
-            a = entries[entry.id]["action"]
+            centry = entries[entry.id]
             crontab = entry.cron.split(" ")
             t = "{}:{}".format(crontab[1], crontab[0].zfill(2))
-            entrylist.append("{}: {} {} @{} {}#{}".format(entry.id, t, entry.message, a.channel.name, a.everyone.server.name, a.everyone.name))
+            entrylist.append("{}: {} {} @{} {}#{}".format(entry.id, t, entry.message, centry.channel.name, centry.everyone.server.name, centry.everyone.name))
             
     msg = "Nothing scheduled"
     if len(entrylist) != 0:
@@ -281,7 +300,7 @@ async def setuser(ctx, entryid, *args, **kwargs):
         await ctx.bot.send_message(ctx.message.channel, "Nothing scheduled with that ID")
         return
     
-    centry,serverid = dbentry
+    centry = entries[entryid]
     centry.channelid = ctx.message.mentions[0].id
     
     uchannel = db.query(Channel).filter_by(id=centry.channelid).first()
@@ -291,13 +310,8 @@ async def setuser(ctx, entryid, *args, **kwargs):
     
     db.commit()
     
-    entry = entries[centry.id]
-    a,cron = (entry["action"], entry["cron"])
-    cron.stop()
-    
-    a = await getAction(centry, ctx.bot, serverid) # Can be more efficient
-    cron = aiocron.crontab(centry.cron, func=a, loop=ctx.bot.loop)
-    entries[centry.id] = {"action": a, "cron": cron}
+    centry.crontab.stop()
+    centry.schedule()
     
     await ctx.bot.send_message(ctx.message.channel, "User set to {}".format(ctx.message.mentions[0].mention))
     
@@ -314,12 +328,9 @@ async def setresponse(ctx, entryid, *args, **kwargs):
         await ctx.bot.send_message(ctx.message.channel, "You can't change that reminder")
         return
     
-    entry = entries[entryid]
-    a,cron = entry["action"], entry["cron"]
-    a.response = " ".join(args)
+    centry = entries[entryid]
+    centry.response = " ".join(args)
     
-    centry, serverid = dbentry
-    centry.response = a.response
     db.commit()
     
     await ctx.bot.send_message(ctx.message.channel, "Response set")
@@ -337,11 +348,8 @@ async def setmessage(ctx, entryid, *args, **kwargs):
         return
     
     entry = entries[entryid]
-    a,cron = entry["action"], entry["cron"]
-    a.message = " ".join(args)
+    entry.message = " ".join(args)
     
-    centry, serverid = dbentry
-    centry.message = a.message
     db.commit()
     
     await ctx.bot.send_message(ctx.message.channel, "Message set")
@@ -364,16 +372,12 @@ async def settime(ctx, entryid, *args, **kwargs):
         return
     
     entry = entries[entryid]
-    a,cron = entry["action"], entry["cron"]
-    cron.stop()
+    entry.crontab.stop()
     
     crontab = "{} {} * * *".format(dc.datetime.minute, dc.datetime.hour)
-    centry, serverid = dbentry
-    centry.cron = crontab
+    entry.cron = crontab
     db.commit()
-    
-    cron = aiocron.crontab(crontab, func=a, loop=ctx.bot.loop)
-    entries[entryid] = {"action": a, "cron": cron}
+    entry.schedule()
     
     await ctx.bot.send_message(ctx.message.channel, "Time updated")
     
@@ -388,16 +392,12 @@ async def remove(ctx, entryid):
     if dbentry is None:
         await ctx.bot.send_message(ctx.message.channel, "You can't remove that item")
         return
-        
-    centry, serverid = dbentry
-        
+            
     entry = entries[entryid]
-    a,cron = entry["action"], entry["cron"]
-    cron.stop()
-    del entries[entryid]
-    
-    db.delete(centry)
+    entry.crontab.stop()
+    db.delete(entry)
     db.commit()
+    del entries[entryid]
     
     await ctx.bot.send_message(ctx.message.channel, "Reminder removed")
     
