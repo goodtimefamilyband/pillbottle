@@ -51,7 +51,13 @@ class CronEntry(Base):
         self.everyone = self.bot.get_channel(self.echannel)
         
     @property
-    def channel(self):
+    async def channel(self):
+        
+        try:
+            self._channel = await asyncio.wait_for(self.channel_task, None)
+        except AttributeError:
+            pass
+            
         return self._channel
         
     @channel.setter
@@ -61,11 +67,16 @@ class CronEntry(Base):
             self._channel = value
             return
             
-        self._channel = yield from value
+        self.channel_task = self.bot.loop.create_task(value)
         
         
     @property
-    def everyone(self):
+    async def everyone(self):
+        try:
+            self._everyone = await asyncio.wait_for(self.everyone_task, None)
+        except AttributeError:
+            pass
+            
         return self._everyone
         
     @everyone.setter
@@ -74,7 +85,7 @@ class CronEntry(Base):
             self._everyone = value
             return
             
-        self._everyone = yield from value
+        self.everyone_task = self.bot.loop.create_task(value)
         
     @hybrid_property
     def channelid(self):
@@ -113,18 +124,23 @@ class CronEntry(Base):
         
         for i in range(self.requestcount):
             #print(i)
-            message = await self.bot.send_message(self.channel, self.message)
-            print(message.channel.id, self.channel.id)
+            channel = await self.channel
+            everyone = await self.everyone
+            message = await self.bot.send_message(channel, self.message)
+            #print(message.channel.id, self.channel.id)
             reply = await self.bot.wait_for_message(channel=message.channel, timeout=self.timeout, check=checkfun(message))
             if reply is not None:
                 #print(reply.content)
-                await self.bot.send_message(self.channel, self.response)
+                await self.bot.send_message(channel, self.response)
                 return
               
-        if self.everyone is not None:
-            await self.bot.send_message(self.everyone, "@everyone please remind {}: {}".format(self.channel.mention, self.message))
+        if everyone is not None:
+            await self.bot.send_message(everyone, "@everyone please remind {}: {}".format(channel.mention, self.message))
             
     def schedule(self):
         self.crontab = aiocron.crontab(self.cron, func=self, loop=self.bot.loop)
+        
+    def setChannelAsync(self, future):
+        self._channel = future.result()
         
 Base.metadata.create_all(engine)

@@ -279,7 +279,11 @@ async def schedule(ctx, *args, **kwargs):
             centry = entries[entry.id]
             crontab = entry.cron.split(" ")
             t = "{}:{}".format(crontab[1], crontab[0].zfill(2))
-            entrylist.append("{}: {} {} @{} {}#{}".format(entry.id, t, entry.message, centry.channel.name, centry.everyone.server.name, centry.everyone.name))
+            
+            channel = await centry.channel
+            everyone = await centry.everyone
+            
+            entrylist.append("{}: {} {} @{} {}#{}".format(entry.id, t, entry.message, channel.name, everyone.server.name, everyone.name))
             
     msg = "Nothing scheduled"
     if len(entrylist) != 0:
@@ -380,6 +384,27 @@ async def settime(ctx, entryid, *args, **kwargs):
     entry.schedule()
     
     await ctx.bot.send_message(ctx.message.channel, "Time updated")
+    
+@bot.command(pass_context=True, no_pm=False)
+async def settimeout(ctx, entryid, timeout):
+    entryid = await processEntryId(entryid, ctx)
+    if entryid is None:
+        return
+        
+    dbentry = checkPermissions(entryid, ctx.message.author.id)
+    if dbentry is None:
+        await ctx.bot.send_message(ctx.message.channel, "You can't change that reminder")
+        return
+        
+    if not timeout.isdigit() and not int(timeout) > 0:
+        await ctx.bot.send_message(ctx.message.channel, "Timeout should be a number > 0")
+        return
+        
+    entry = entries[entryid]
+    entry.timeout = int(timeout)
+    db.commit()
+    
+    await ctx.bot.send_message(ctx.message.channel, "Timeout set")
     
 @bot.command(pass_context=True, no_pm=False)
 async def remove(ctx, entryid):
