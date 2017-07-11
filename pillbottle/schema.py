@@ -67,6 +67,11 @@ class CronEntry(Base):
             self._channel = value
             return
             
+        try:
+            del self._channel
+        except AttributeError:
+            pass
+            
         self.channel_task = self.bot.loop.create_task(value)
         
         
@@ -84,6 +89,11 @@ class CronEntry(Base):
         if not asyncio.iscoroutine(value):
             self._everyone = value
             return
+        
+        try:
+            del self._everyone
+        except AttributeError:
+            pass
             
         self.everyone_task = self.bot.loop.create_task(value)
         
