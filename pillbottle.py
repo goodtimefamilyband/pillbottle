@@ -8,8 +8,8 @@ from discord.ext import commands
 import re
 
 #from pillbottle import getAction
-from pillbottle.classes import RegexChecker, DateChecker
-from pillbottle.schema import Session, CronEntry, Channel
+from pillbottle.classes import RegexChecker, DateChecker, ReminderConvo, SetupConvo
+from pillbottle.schema import Session, CronEntry, Channel, User
 from sqlalchemy.orm import aliased
 
 import sys
@@ -31,6 +31,7 @@ qorder = ["hourly", "daily", "weekly", "monthly", "yearly"]
 qre = re.compile("|".join(qorder))
 
 entries = {}
+convos = {}
 
 qdict = { 
 "hourly" : "What minute?",
@@ -90,7 +91,16 @@ async def on_ready():
         
         entries[entry.id] = entry
         entry.bot = bot
-        entry.schedule()
+        #entry.schedule()
+        
+        '''
+        channel = await entry.channel
+        channel = bot.get_channel(channel.id)
+        
+        everyone = await entry.everyone
+        '''
+        convos[entry.id] = ReminderConvo(entry, db)
+        bot.loop.create_task(convos[entry.id].run())
         
     print(entries)
     
@@ -100,10 +110,59 @@ async def remind(ctx, *args, **kwargs):
     
     message = " ".join(args)
     user = ctx.message.author
+    uchannel = ctx.message.channel
+    
+    print(user, user.id, uchannel, uchannel.id, ctx.bot.get_channel(uchannel.id))
+    print(ctx.bot.private_channels)
+    
     if len(ctx.message.mentions) > 0:
         user = ctx.message.mentions[0]
+    
+    convo = SetupConvo(ctx)
+    
+    await convo.run()
+    
+    '''
+    entry = "{} {} * * *".format(convo.dc.datetime.minute, convo.dc.datetime.hour)
+    
+    uchan = db.query(Channel).filter_by(id=user.id).first()
+    if uchan is None:
+        uchan = Channel(id=ctx.message.author.id, serverid=None)
+        db.add(uchan)
         
+    echan = db.query(Channel).filter_by(id=convo.channel.id).first()
+    if echan is None:
+        echan = Channel(id=convo.channel.id, serverid=convo.channel.server.id)
+        db.add(echan)
         
+    centry = CronEntry(channelid=uchan.id, 
+    message=message, 
+    timeout=900, 
+    requestcount=3, 
+    echannel=echan.id, 
+    response="Thank you!",
+    cron=entry)
+    '''
+    
+    centry = convo.getNewEntry(message, db)     
+    centry.bot = ctx.bot
+    
+    rconvo = ReminderConvo(centry, db)
+    ctx.bot.loop.create_task(rconvo.run())
+    
+    entries[centry.id] = centry
+    convos[centry.id] = rconvo
+    
+    await ctx.bot.send_message(ctx.message.channel, "Reminder set! ({})".format(centry.id))
+    
+    print(convo.dc.datetime)
+    print(convo.server)
+    print(convo.channel)
+    
+    '''
+    await ctx.bot.send_message(ctx.message.channel, "ok")
+    
+    
     dc = DateChecker()
     await ctx.bot.send_message(ctx.message.channel, "Reminders are daily.  What time would you like to be reminded?")
     reply = await ctx.bot.wait_for_message(author=ctx.message.author, channel=ctx.message.channel, check=dc)
@@ -182,7 +241,7 @@ async def remind(ctx, *args, **kwargs):
             entries[centry.id] = centry
             
             await ctx.bot.send_message(ctx.message.channel, "Reminder set! ({})".format(centry.id))    
-
+    '''
 
 '''
 @bot.command(pass_context=True, no_pm=False)
@@ -261,12 +320,12 @@ async def set(ctx, *args, **kwargs):
     
 @bot.command(pass_context=True, no_pm=False)
 async def schedule(ctx, *args, **kwargs):
-    uchannels = aliased(Channel)
+    uchannels = aliased(User)
     echannels = aliased(Channel)
     entrylist = []
     
     query = db.query(CronEntry, uchannels.id, echannels.id, echannels.serverid)\
-    .join(uchannels, CronEntry.channelid == uchannels.id)\
+    .join(uchannels, CronEntry.userid == uchannels.id)\
     .join(echannels, CronEntry.echannel == echannels.id)
     
     if ctx.message.server is None:
@@ -280,10 +339,9 @@ async def schedule(ctx, *args, **kwargs):
             crontab = entry.cron.split(" ")
             t = "{}:{}".format(crontab[1], crontab[0].zfill(2))
             
-            channel = await centry.channel
-            everyone = await centry.everyone
+            await centry.wait_for_discord()
             
-            entrylist.append("{}: {} {} @{} {}#{}".format(entry.id, t, entry.message, channel.name, everyone.server.name, everyone.name))
+            entrylist.append("{}: {} {} @{} {}#{}".format(entry.id, t, entry.message, centry.user.name, centry.everyone.server.name, centry.everyone.name))
             
     msg = "Nothing scheduled"
     if len(entrylist) != 0:
@@ -406,6 +464,21 @@ async def settimeout(ctx, entryid, timeout):
     
     await ctx.bot.send_message(ctx.message.channel, "Timeout set")
     
+@bot.command(pass_context=True, no_pm=False)
+async def notifyeveryone(ctx, entryid):
+    
+    entryid = await processEntryId(entryid, ctx)
+    if entryid is None:
+        return
+        
+    dbentry = checkPermissions(entryid, ctx.message.author.id)
+    if dbentry is None:
+        await ctx.bot.send_message(ctx.message.channel, "You can't change that reminder")
+        return
+        
+    entry = entries[entryid]
+    
+   
 @bot.command(pass_context=True, no_pm=False)
 async def remove(ctx, entryid):
     

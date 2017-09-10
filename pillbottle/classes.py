@@ -1,5 +1,25 @@
-from .schema import CronEntry, Channel
+from .schema import CronEntry, Channel, User
 from dateutil import parser
+import asyncio
+import discord
+from croniter import croniter
+import time
+from datetime import datetime
+import pytz
+
+# to fix a discord bug
+class MessageSender:
+    def __init__(self, bot, channel, message):
+        self.bot = bot
+        self.channel = channel
+        self.message = message
+        self.sent = False
+        
+    async def __call__(self):
+        print("Trying to send message", self.sent)
+        if(not self.sent):
+            self.sent = True
+            await self.bot.send_message(self.channel, self.message)
 
 class RegexChecker:
     def __init__(self, qre):
@@ -9,7 +29,8 @@ class RegexChecker:
         self.match = self.qre.search(message.content)
         print("Check:", self.match)
         return self.match is not None
-        
+
+localtz = pytz.timezone("America/New_York")        
 class DateChecker:
     
     def __call__(self, message):
@@ -26,42 +47,58 @@ class Question:
     
     def __init__(self, txt, channel, done_cb=None, filters={}):
         self.text = txt
-        self.cb = cb
+        self.cb = done_cb
+        self.timeout = None
+        
+        print("Question", channel)
         self.channel = channel
         self.filters = filters
         
     async def ask(self, bot):
-        self.message = await bot.send_message(self.channel, self.txt)
+    
+        print("Asking", self.channel)
+        
+        if self.text:
+            self.message = await bot.send_message(self.channel, self.text)
+        
         self.future = bot.loop.create_task(bot.wait_for_message(**self.filters))
         
         if self.cb is not None:
             self.future.add_done_callback(self.cb)
+        
         return self.future
         
     async def process_response(self, response):
         return None
+        
+    def timed_out(self):
+        pass
         
 class ServerQuestion(Question):
 
     def __init__(self, ctx, *args, **kwargs):
         self.ctx = ctx
         self.response = None
-        super().__init__(args, kwargs)
+        super().__init__(*args, **kwargs)
         
 
     async def process_response(self, response):
-    
+        print("ServerQuestion response", self.response, self.ctx)
         if self.response is not None:    
-            coro = ctx.bot.send_message(ctx.message.channel, self.response)
-            return ctx.bot.loop.create_task(coro)
+            coro = self.ctx.bot.send_message(self.ctx.message.channel, self.response)
+            return self.ctx.bot.loop.create_task(coro)
             
         return None
         
 class ListQuestion(Question):
     
     def __init__(self, txt, channel, choices=[], vfun=lambda v: v, done_cb=None, filters={}):
-        self.text = txt + "\n"
-        self.text += "\n".join(["{}: {}".format(i,vfun(choices[i])) for i in len(choices)])
+        
+        print("ListQuestion choices", choices)
+        
+        txt += "\n"
+        txt += "\n".join(["{}: {}".format(i,vfun(choices[i])) for i in range(len(choices))])
+        
         self.choices = choices
         self.selected = None
         
@@ -71,7 +108,7 @@ class ListQuestion(Question):
         else:
             filters["check"] = self.check
         
-        super().__init__(txt, channel, done_cb, filters)
+        super().__init__(txt, channel, done_cb=done_cb, filters=filters)
         
     def check(self, msg):
         try:
@@ -79,27 +116,35 @@ class ListQuestion(Question):
             if i >= len(self.choices):
                 return False
                 
-            self.selected = choices[i]
+            self.selected = self.choices[i]
             return True
         except ValueError:
-            return False
-        
+            return False        
         
 
 class Conversation:
 
     def __init__(self, bot, first, timeout=None):
+        print("Conversation")
         self.bot = bot
         self.timeout = timeout
         self.question = first
 
     async def run(self):
-        
+        print("Running")
         while self.question is not None:
             self.current_future = await self.question.ask(self.bot)
-            response = await asyncio.wait_for(self.current_future, self.timeout)
-            current_future = self.bot.loop.create_task(self.question.process_response(response))
+            try:
+                current_future = None
+                print("timeout", self.question.timeout)
+                response = await asyncio.wait_for(self.current_future, self.question.timeout)
             
+                if self.question is not None:
+                    current_future = self.bot.loop.create_task(self.question.process_response(response))
+            
+            except asyncio.TimeoutError:
+                self.question.timed_out()
+                
             if type(current_future) == asyncio.Future:
                 self.current_future = current_future
                 await asyncio.wait_for(self.current_future, self.timeout)
@@ -107,18 +152,20 @@ class Conversation:
     async def cancel(self):
         self.current_future.cancel()
         
-class ReminderConvo(Conversation):
+class SetupConvo(Conversation):
 
     def __init__(self, ctx, timeout=None):
-        
+        print("Reminder")
         self.ctx = ctx
         self.dc = DateChecker()
         filters = {"author": ctx.message.author,
         "channel": ctx.message.channel, 
-        "check": dc}
+        "check": self.dc}
+        
+        print(ctx.message.channel)
         
         q = Question("Reminders are daily.  What time would you like to be reminded?", 
-        ctx.message.channel,
+        channel=ctx.message.channel,
         done_cb=self.timeResponse, 
         filters=filters)
         
@@ -157,8 +204,10 @@ class ReminderConvo(Conversation):
             self.question.response = "You can't read any messages of channels that I can send to in {}...".format(reply.content)
             return
         
+        print("Possible Channels", possible_channels)
+        
         #def __init__(self, txt, channel, choices=[], vfun=lambda v: v, done_cb=None, filters={}):
-        filters = {"channel": ctx.message.channel, "author": ctx.message.author}
+        filters = {"channel": self.ctx.message.channel, "author": self.ctx.message.author}
         
         self.question = ListQuestion("Select a channel:", 
         self.ctx.message.channel, 
@@ -167,10 +216,138 @@ class ReminderConvo(Conversation):
         done_cb=self.channelResponse,
         filters=filters)
         
-    def channelResponse(self, future)
+    def channelResponse(self, future):
         self.channel = self.question.selected
         self.question = None
         
+    def getNewEntry(self, message, db):
+        '''
+        _channelid = Column("channelid", String, ForeignKey('channels.id'))
+        _userid = Column('userid', String, ForeignKey('users.id'))
+        message = Column(String, nullable=False)
+        timeout = Column(Integer)
+        requestcount = Column(Integer)
+        _echannel = Column("echannel", String, ForeignKey('channels.id'))
+        cron = Column(String, nullable=False)
+        response = Column(String, nullable=False)
+        next_run = Column(Float)
+        '''
+        uchan = db.query(Channel).filter_by(id=self.ctx.message.channel.id).first()
+        if uchan is None:
+            serverid = None if self.ctx.message.server is None else self.ctx.message.server.id
+            servername = None if serverid is None else self.ctx.message.server.name
+            uchan = Channel(id=self.ctx.message.channel.id, name=self.ctx.message.channel.name, serverid=serverid, servername=servername)
+            db.add(uchan)
+            
+        u = db.query(User).filter_by(id=self.ctx.message.author.id).first()
+        if u is None:
+            u = User(id=self.ctx.message.author.id, name=self.ctx.message.author.name)
+            db.add(u)
+            
+        echan = db.query(Channel).filter_by(id=self.channel.id).first()
+        if echan is None:
+            echan = Channel(id=self.channel.id, name=self.channel.name, serverid=self.channel.server.id, servername=self.channel.server.name)
+            db.add(echan)
+        
+        
+        utcnow = datetime.utcnow()
+        tzoffset = localtz.utcoffset(utcnow)
+        dt = self.dc.datetime - tzoffset
+        cron = "{} {} * * *".format(dt.minute, dt.hour)
+        citer = croniter(cron, time.time())
+    
+        centry = CronEntry(channelid=uchan.id, 
+        userid=u.id,
+        message=message, 
+        timeout=5, 
+        requestcount=3, 
+        echannel=self.channel.id, 
+        response="Thank you!",
+        cron=cron,
+        next_run=citer.get_next(float))
+        
+        db.add(centry)
+        db.commit()
+        
+        return centry
+        
+class ReminderQuestion(Question):
+
+    #def __init__(self, txt, channel, done_cb=None, filters={}):
+    def __init__(self, centry, db, done_cb=None, filters={}):
+    
+        self.centry = centry
+        self.remaining = centry.requestcount
+        self.db = db
+        super().__init__(None, None, done_cb, filters)
+        
+        t = time.time()
+        dt = datetime.fromtimestamp(t)
+        self.croniter = croniter(centry.cron)
+        
+        print(t, self.centry.next_run, t - self.centry.next_run)
+        self.centry.next_run = self.croniter.get_next(float)
+        while self.centry.next_run < t:
+            self.centry.next_run = self.croniter.get_next(float)
+            
+        self.db.commit()
+    
+        self.timeout = self.centry.next_run - t
+        
+        print("Next run", self.timeout, datetime.fromtimestamp(self.centry.next_run), datetime.fromtimestamp(t), centry.cron)
+        
+    async def wait_for_discord(self):
+        await self.centry.wait_for_discord()
+        self.filters["author"] = self.centry.user
+        self.filters["channel"] = self.channel = self.centry.channel
+        
+        self.extra_mention = self.centry.user.name
+        member = discord.utils.find(lambda m : m.id == self.centry.user.id, self.centry.everyone.server.members)
+        if member is not None:
+            self.extra_mention = member.mention
+        
+    def timed_out(self):
+        self.remaining -= 1
+        if self.remaining >= 0:
+            print("Remind")
+            self.timeout = self.centry.timeout
+            self.text = self.centry.message
+        else:
+            print("Extra remind")
+            self.centry.next_run = self.croniter.get_next(float)
+            self.db.commit()
+            self.timeout = self.centry.next_run - time.time()
+            self.text = None
+            
+            text = "@everyone please remind {}: {}".format(self.extra_mention, self.centry.message)
+            coro = self.centry.bot.send_message(self.centry.everyone, text)
+            asyncio.ensure_future(coro)
+            #ms = MessageSender(self.centry.bot, self.centry.everyone, text)
+            #asyncio.ensure_future(ms())  
+            
+    async def process_response(self, reply):
+        pass
+
+        
+class ReminderConvo(Conversation):
+
+    def __init__(self, centry, db):
+        self.centry = centry
+        self.remaining = centry.requestcount
+        self.bot = centry.bot
+        
+        q = ReminderQuestion(centry, db)
+        super().__init__(self.bot, q)
+        
+    async def run(self):
+        # TODO: use async/futures, so immediately cancellable
+        await self.question.wait_for_discord()
+        await super().run()
+        
+    def callback(self, future):
+        pass
+        #self.timeout = self.centry.timeout
+        #print("Callback", future.result())
         
             
 class Action:
