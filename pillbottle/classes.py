@@ -42,6 +42,13 @@ class DateChecker:
             return True
         except ValueError:
             return False
+            
+    def get_crontab(self):
+        utcnow = datetime.utcnow()
+        tzoffset = localtz.utcoffset(utcnow)
+        dt = self.datetime - tzoffset
+        return "{} {} * * *".format(dt.minute, dt.hour)
+        
 
 class Question:
     
@@ -132,22 +139,26 @@ class Conversation:
 
     async def run(self):
         print("Running")
-        while self.question is not None:
-            self.current_future = await self.question.ask(self.bot)
-            try:
-                current_future = None
-                print("timeout", self.question.timeout)
-                response = await asyncio.wait_for(self.current_future, self.question.timeout)
-            
-                if self.question is not None:
-                    current_future = self.bot.loop.create_task(self.question.process_response(response))
-            
-            except asyncio.TimeoutError:
-                self.question.timed_out()
+        
+        try:
+            while self.question is not None:
+                self.current_future = await self.question.ask(self.bot)
+                try:
+                    current_future = None
+                    print("timeout", self.question.timeout)
+                    response = await asyncio.wait_for(self.current_future, self.question.timeout)
                 
-            if type(current_future) == asyncio.Future:
-                self.current_future = current_future
-                await asyncio.wait_for(self.current_future, self.timeout)
+                    if self.question is not None:
+                        current_future = self.bot.loop.create_task(self.question.process_response(response))
+                
+                except asyncio.TimeoutError:
+                    self.question.timed_out()
+                    
+                if type(current_future) == asyncio.Future:
+                    self.current_future = current_future
+                    await asyncio.wait_for(self.current_future, self.timeout)
+        except asyncio.CancelledError:
+            return
         
     async def cancel(self):
         self.current_future.cancel()
@@ -249,17 +260,13 @@ class SetupConvo(Conversation):
             echan = Channel(id=self.channel.id, name=self.channel.name, serverid=self.channel.server.id, servername=self.channel.server.name)
             db.add(echan)
         
-        
-        utcnow = datetime.utcnow()
-        tzoffset = localtz.utcoffset(utcnow)
-        dt = self.dc.datetime - tzoffset
-        cron = "{} {} * * *".format(dt.minute, dt.hour)
+        cron = self.dc.get_crontab()
         citer = croniter(cron, time.time())
     
         centry = CronEntry(channelid=uchan.id, 
         userid=u.id,
         message=message, 
-        timeout=5, 
+        timeout=900, 
         requestcount=3, 
         echannel=self.channel.id, 
         response="Thank you!",
@@ -282,8 +289,8 @@ class ReminderQuestion(Question):
         super().__init__(None, None, done_cb, filters)
         
         t = time.time()
-        dt = datetime.fromtimestamp(t)
-        self.croniter = croniter(centry.cron)
+        dt = t if self.centry.next_run is None else self.centry.next_run - 1
+        self.croniter = croniter(centry.cron, start_time=dt)
         
         print(t, self.centry.next_run, t - self.centry.next_run)
         self.centry.next_run = self.croniter.get_next(float)
@@ -322,11 +329,21 @@ class ReminderQuestion(Question):
             text = "@everyone please remind {}: {}".format(self.extra_mention, self.centry.message)
             coro = self.centry.bot.send_message(self.centry.everyone, text)
             asyncio.ensure_future(coro)
-            #ms = MessageSender(self.centry.bot, self.centry.everyone, text)
-            #asyncio.ensure_future(ms())  
             
     async def process_response(self, reply):
-        pass
+        
+        skipped = self.croniter.get_prev(datetime) > reply.timestamp
+        if not skipped:
+            await self.centry.bot.send_message(self.centry.channel, self.centry.response)
+            
+        self.croniter.get_next(datetime)
+        if not skipped:
+            self.centry.next_run = self.croniter.get_next(float)
+            self.db.add(self.centry)
+            self.db.commit()
+            
+        self.timeout = self.centry.next_run - time.time()
+        print("process_response: next_run", self.timeout, self.centry.next_run, datetime.fromtimestamp(self.centry.next_run))
 
         
 class ReminderConvo(Conversation):

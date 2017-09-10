@@ -17,7 +17,7 @@ Base = declarative_base()
 engine = create_engine(SQLALCHEMY_DATABASE_URI, echo=SQL_DEBUG)
 
 Session = sessionmaker(bind=engine)
-objDb = Session()    
+db = Session()
 
 class DiscordBase:
 
@@ -25,7 +25,7 @@ class DiscordBase:
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.event = asyncio.Event()
-    '''
+    '''   
 
     @property
     def bot(self):
@@ -108,33 +108,71 @@ class CronEntry(Base):
         print("setbot", self.userid, self.channelid, self.echannel)
         self._bot = value
         
-        self._user = objDb.query(User).filter_by(id=self.userid).first()
-        self._channel = objDb.query(Channel).filter_by(id=self.channelid).first()
-        self._everyone = objDb.query(Channel).filter_by(id=self.echannel).first()
+        self._user = db.query(User).filter_by(id=self.userid).first()
+        self._channel = db.query(Channel).filter_by(id=self.channelid).first()
+        self._everyone = db.query(Channel).filter_by(id=self.echannel).first()
         
         self._user.bot = self._bot
     
     async def wait_for_discord(self):
-        await self._user.wait_for_discord()
+        if self._user.discord is None:
+            await self._user.wait_for_discord()
+        
         self._channel.user = self._user.discord
         
-        self._channel.bot = self._bot
-        self._everyone.bot = self._bot
+        if self._channel.discord is None:
+            self._channel.bot = self._bot
+            await self._channel.wait_for_discord()
         
-        await self._channel.wait_for_discord()
-        await self._everyone.wait_for_discord()
+        if self._everyone.discord is None:
+            self._everyone.bot = self._bot
+            await self._everyone.wait_for_discord()
+        
+    def load_dbchannel_by_discord_channel(self, value):
+        dbchan = db.query(Channel).filter_by(id=value.id).first()
+        if dbchan is None:
+            dbchan = Channel(id=value.id, name=value.name)
+            if value.server is not None:
+                dbchan.serverid = value.server.id
+                dbchan.servername = value.server.name
+                
+            db.add(dbchan)
+            db.commit()
+            
+        dbchan.discord = value
+        return dbchan
         
     @property
     def channel(self):
         return self._channel.discord
         
+    @channel.setter
+    def channel(self, value):
+        self._channel = self.load_dbchannel_by_discord_channel(value)
+        
     @property
     def everyone(self):
         return self._everyone.discord
         
+    @everyone.setter
+    def everyone(self, value):
+        self._everyone = self.load_dbchannel_by_discord_channel(value)
+        
     @property
     def user(self):
         return self._user.discord
+        
+    @user.setter
+    def user(self, user):
+        dbuser = db.query(User).filter_by(id=value.id).first()
+        if dbuser is None:
+            dbuser = User(id=value.id, name=value.name)    
+            db.add(dbuser)
+            db.commit()
+            
+        dbuser.discord = value
+        self._user = dbuser
+        
     '''    
     @property
     async def channel(self):

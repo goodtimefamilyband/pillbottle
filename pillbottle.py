@@ -9,7 +9,7 @@ import re
 
 #from pillbottle import getAction
 from pillbottle.classes import RegexChecker, DateChecker, ReminderConvo, SetupConvo
-from pillbottle.schema import Session, CronEntry, Channel, User
+from pillbottle.schema import Session, CronEntry, Channel, User, db
 from sqlalchemy.orm import aliased
 
 import sys
@@ -24,7 +24,7 @@ botmaster = "0"
 if len(sys.argv) > 2:
     botmaster = sys.argv[2]
 
-db = Session()
+#db = Session()
 
 cronorder = ["hourly", "daily", "monthly", "yearly", "weekly"]
 qorder = ["hourly", "daily", "weekly", "monthly", "yearly"]
@@ -63,7 +63,7 @@ def checkPermissions(entryid, userid):
     
     print(userid, type(userid), botmaster, type(botmaster), userid != botmaster)
     if userid != botmaster:
-        query = query.filter(CronEntry.channelid==userid)
+        query = query.filter(CronEntry.userid==userid)
     
     return query.first()
     
@@ -347,7 +347,7 @@ async def schedule(ctx, *args, **kwargs):
     if len(entrylist) != 0:
         msg = "\n".join(entrylist)
             
-    await ctx.bot.send_message(ctx.message.channel, "```Times are in 24-hour format.\n{}```".format(msg))
+    await ctx.bot.send_message(ctx.message.channel, "```Times are in UTC 24-hour format.\n{}```".format(msg))
 
 @bot.command(pass_context=True, no_pm=False)    
 async def setuser(ctx, entryid, *args, **kwargs):
@@ -363,17 +363,16 @@ async def setuser(ctx, entryid, *args, **kwargs):
         return
     
     centry = entries[entryid]
-    centry.channelid = ctx.message.mentions[0].id
+    centry.user = ctx.message.mentions[0]
     
-    uchannel = db.query(Channel).filter_by(id=centry.channelid).first()
-    if uchannel is None:
-        uchannel = Channel(id=centry.channelid, serverid=None)
-        db.add(uchannel)
-    
-    db.commit()
-    
-    centry.crontab.stop()
-    centry.schedule()
+    if len(ctx.message.channel_mentions) == 1:
+        centry.channel = ctx.message.channel_mentions[0]
+    else:
+        centry.channel = await bot.start_private_message(ctx.message.mentions[0])
+        
+    await convos[entryid].cancel()
+    convos[entryid] = ReminderConvo(centry, db)
+    bot.loop.create_task(convos[entryid].run())
     
     await ctx.bot.send_message(ctx.message.channel, "User set to {}".format(ctx.message.mentions[0].mention))
     
@@ -434,12 +433,15 @@ async def settime(ctx, entryid, *args, **kwargs):
         return
     
     entry = entries[entryid]
-    entry.crontab.stop()
+    #entry.crontab.stop()
     
-    crontab = "{} {} * * *".format(dc.datetime.minute, dc.datetime.hour)
+    crontab = dc.get_crontab()
     entry.cron = crontab
     db.commit()
-    entry.schedule()
+    
+    await convos[entryid].cancel()
+    convos[entryid] = ReminderConvo(entry, db)
+    bot.loop.create_task(convos[entryid].run())
     
     await ctx.bot.send_message(ctx.message.channel, "Time updated")
     
@@ -492,10 +494,13 @@ async def remove(ctx, entryid):
         return
             
     entry = entries[entryid]
-    entry.crontab.stop()
     db.delete(entry)
     db.commit()
+    
+    await convos[entryid].cancel()
+    
     del entries[entryid]
+    del convos[entryid]
     
     await ctx.bot.send_message(ctx.message.channel, "Reminder removed")
     
