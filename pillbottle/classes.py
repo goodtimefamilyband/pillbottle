@@ -266,7 +266,7 @@ class SetupConvo(Conversation):
         centry = CronEntry(channelid=uchan.id, 
         userid=u.id,
         message=message, 
-        timeout=900, 
+        timeout=2400, 
         requestcount=3, 
         echannel=self.channel.id, 
         response="Thank you!",
