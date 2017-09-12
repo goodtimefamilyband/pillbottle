@@ -362,6 +362,7 @@ async def setuser(ctx, entryid, *args, **kwargs):
         await ctx.bot.send_message(ctx.message.channel, "Nothing scheduled with that ID")
         return
     
+    entryid = int(entryid)
     centry = entries[entryid]
     centry.user = ctx.message.mentions[0]
     
@@ -369,7 +370,8 @@ async def setuser(ctx, entryid, *args, **kwargs):
         centry.channel = ctx.message.channel_mentions[0]
     else:
         centry.channel = await bot.start_private_message(ctx.message.mentions[0])
-        
+    
+    db.commit()
     await convos[entryid].cancel()
     convos[entryid] = ReminderConvo(centry, db)
     bot.loop.create_task(convos[entryid].run())

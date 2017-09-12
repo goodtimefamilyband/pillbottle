@@ -132,14 +132,18 @@ class CronEntry(Base):
         dbchan = db.query(Channel).filter_by(id=value.id).first()
         if dbchan is None:
             dbchan = Channel(id=value.id, name=value.name)
-            if value.server is not None:
-                dbchan.serverid = value.server.id
-                dbchan.servername = value.server.name
-                
+            
+            try:
+                if value.server is not None:
+                    dbchan.serverid = value.server.id
+                    dbchan.servername = value.server.name
+            except AttributeError:
+                pass
+                    
             db.add(dbchan)
             db.commit()
             
-        dbchan.discord = value
+        dbchan._discord = value
         return dbchan
         
     @property
@@ -163,14 +167,14 @@ class CronEntry(Base):
         return self._user.discord
         
     @user.setter
-    def user(self, user):
+    def user(self, value):
         dbuser = db.query(User).filter_by(id=value.id).first()
         if dbuser is None:
             dbuser = User(id=value.id, name=value.name)    
             db.add(dbuser)
             db.commit()
             
-        dbuser.discord = value
+        dbuser._discord = value
         self._user = dbuser
         
     '''    

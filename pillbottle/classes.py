@@ -136,7 +136,7 @@ class Conversation:
         self.bot = bot
         self.timeout = timeout
         self.question = first
-
+        
     async def run(self):
         print("Running")
         
@@ -307,6 +307,7 @@ class ReminderQuestion(Question):
         await self.centry.wait_for_discord()
         self.filters["author"] = self.centry.user
         self.filters["channel"] = self.channel = self.centry.channel
+        self.filters["check"] = self.command_check
         
         self.extra_mention = self.centry.user.name
         member = discord.utils.find(lambda m : m.id == self.centry.user.id, self.centry.everyone.server.members)
@@ -326,7 +327,7 @@ class ReminderQuestion(Question):
             self.timeout = self.centry.next_run - time.time()
             self.text = None
             
-            text = "@everyone please remind {}: {}".format(self.extra_mention, self.centry.message)
+            text = "@here please remind {}: {}".format(self.extra_mention, self.centry.message)
             coro = self.centry.bot.send_message(self.centry.everyone, text)
             asyncio.ensure_future(coro)
             
@@ -341,9 +342,13 @@ class ReminderQuestion(Question):
             self.centry.next_run = self.croniter.get_next(float)
             self.db.add(self.centry)
             self.db.commit()
+            self.remaining = self.centry.requestcount
             
         self.timeout = self.centry.next_run - time.time()
         print("process_response: next_run", self.timeout, self.centry.next_run, datetime.fromtimestamp(self.centry.next_run))
+        
+    def command_check(self, message):
+        return not message.content.startswith(self.centry.bot.command_prefix)
 
         
 class ReminderConvo(Conversation):
