@@ -75,7 +75,7 @@ class Question:
         
         return self.future
         
-    async def process_response(self, response):
+    def process_response(self, response):
         return None
         
     def timed_out(self):
@@ -89,7 +89,7 @@ class ServerQuestion(Question):
         super().__init__(*args, **kwargs)
         
 
-    async def process_response(self, response):
+    def process_response(self, response):
         print("ServerQuestion response", self.response, self.ctx)
         if self.response is not None:    
             coro = self.ctx.bot.send_message(self.ctx.message.channel, self.response)
@@ -149,14 +149,15 @@ class Conversation:
                     response = await asyncio.wait_for(self.current_future, self.question.timeout)
                 
                     if self.question is not None:
-                        current_future = self.bot.loop.create_task(self.question.process_response(response))
+                        current_future = self.question.process_response(response)
                 
                 except asyncio.TimeoutError:
                     self.question.timed_out()
                     
+                print(type(current_future))
                 if type(current_future) == asyncio.Future:
                     self.current_future = current_future
-                    await asyncio.wait_for(self.current_future, self.timeout)
+                    await asyncio.wait_for(self.current_future, None)
         except asyncio.CancelledError:
             return
         
@@ -266,7 +267,7 @@ class SetupConvo(Conversation):
         centry = CronEntry(channelid=uchan.id, 
         userid=u.id,
         message=message, 
-        timeout=2400, 
+        timeout=5, 
         requestcount=3, 
         echannel=self.channel.id, 
         response="Thank you!",
@@ -331,21 +332,25 @@ class ReminderQuestion(Question):
             coro = self.centry.bot.send_message(self.centry.everyone, text)
             asyncio.ensure_future(coro)
             
-    async def process_response(self, reply):
+    def process_response(self, reply):
         
-        skipped = self.croniter.get_prev(datetime) > reply.timestamp
-        if not skipped:
-            await self.centry.bot.send_message(self.centry.channel, self.centry.response)
-            
+        prev = self.croniter.get_prev(datetime)
+        skipped = prev > reply.timestamp
         self.croniter.get_next(datetime)
+        fut = None
         if not skipped:
+            fut = self.centry.bot.loop.create_task(self.centry.bot.send_message(self.centry.channel, self.centry.response))
+            
             self.centry.next_run = self.croniter.get_next(float)
             self.db.add(self.centry)
             self.db.commit()
             self.remaining = self.centry.requestcount
+            self.text = None
             
         self.timeout = self.centry.next_run - time.time()
         print("process_response: next_run", self.timeout, self.centry.next_run, datetime.fromtimestamp(self.centry.next_run))
+        print("skipped", skipped, prev)
+        return fut
         
     def command_check(self, message):
         return not message.content.startswith(self.centry.bot.command_prefix)
