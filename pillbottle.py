@@ -89,18 +89,19 @@ async def on_ready():
     .join(uchannels, CronEntry.channelid == uchannels.id)\
     .join(echannels, CronEntry.echannel == echannels.id):
         
-        entries[entry.id] = entry
-        entry.bot = bot
-        #entry.schedule()
-        
-        '''
-        channel = await entry.channel
-        channel = bot.get_channel(channel.id)
-        
-        everyone = await entry.everyone
-        '''
-        convos[entry.id] = ReminderConvo(entry, db)
-        bot.loop.create_task(convos[entry.id].run())
+        if not entry.id in entries:
+            entries[entry.id] = entry
+            entry.bot = bot
+            #entry.schedule()
+            
+            '''
+            channel = await entry.channel
+            channel = bot.get_channel(channel.id)
+            
+            everyone = await entry.everyone
+            '''
+            convos[entry.id] = ReminderConvo(entry, db)
+            bot.loop.create_task(convos[entry.id].run())
         
     print(entries)
     
