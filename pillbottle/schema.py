@@ -153,6 +153,7 @@ class CronEntry(Base):
     @channel.setter
     def channel(self, value):
         self._channel = self.load_dbchannel_by_discord_channel(value)
+        self.channelid = value.id
         
     @property
     def everyone(self):
@@ -161,6 +162,7 @@ class CronEntry(Base):
     @everyone.setter
     def everyone(self, value):
         self._everyone = self.load_dbchannel_by_discord_channel(value)
+        self.echannel = value.id
         
     @property
     def user(self):
@@ -174,6 +176,7 @@ class CronEntry(Base):
             db.add(dbuser)
             db.commit()
             
+        self.userid = dbuser.id
         dbuser._discord = value
         self._user = dbuser
         
