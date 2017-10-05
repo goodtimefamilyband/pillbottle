@@ -323,12 +323,17 @@ class ReminderQuestion(Question):
             self.text = self.centry.message
         else:
             print("Extra remind")
+            
+            '''
+            self.remaining = self.centry.requestcount
             self.centry.next_run = self.croniter.get_next(float)
             self.db.commit()
-            self.timeout = self.centry.next_run - time.time()
             self.text = None
+            '''
+            self.reset()
+            self.timeout = self.centry.next_run - time.time()
             
-            text = "@here please remind {}: {}".format(self.extra_mention, self.centry.message)
+            text = "Please remind {}: {}".format(self.extra_mention, self.centry.message)
             coro = self.centry.bot.send_message(self.centry.everyone, text)
             asyncio.ensure_future(coro)
             
@@ -340,12 +345,7 @@ class ReminderQuestion(Question):
         fut = None
         if not skipped:
             fut = self.centry.bot.loop.create_task(self.centry.bot.send_message(self.centry.channel, self.centry.response))
-            
-            self.centry.next_run = self.croniter.get_next(float)
-            self.db.add(self.centry)
-            self.db.commit()
-            self.remaining = self.centry.requestcount
-            self.text = None
+            self.reset()
             
         self.timeout = self.centry.next_run - time.time()
         print("process_response: next_run", self.timeout, self.centry.next_run, datetime.fromtimestamp(self.centry.next_run))
@@ -354,7 +354,13 @@ class ReminderQuestion(Question):
         
     def command_check(self, message):
         return not message.content.startswith(self.centry.bot.command_prefix)
-
+        
+    def reset(self):
+        self.remaining = self.centry.requestcount
+        self.centry.next_run = self.croniter.get_next(float)
+        self.db.add(self.centry)
+        self.db.commit()
+        self.text = None
         
 class ReminderConvo(Conversation):
 
