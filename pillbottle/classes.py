@@ -287,6 +287,10 @@ class ReminderQuestion(Question):
         self.centry = centry
         self.remaining = centry.requestcount
         self.db = db
+        
+        if self.centry.passphrase is not None:
+            filters["content"] = self.centry.passphrase
+            
         super().__init__(None, None, done_cb, filters)
         
         t = time.time()
@@ -334,6 +338,10 @@ class ReminderQuestion(Question):
             self.timeout = self.centry.next_run - time.time()
             
             text = "Please remind {}: {}".format(self.extra_mention, self.centry.message)
+            print("Role: {}".format(self.centry.role))
+            if self.centry.role is not None:
+                text = self.centry.role.mention + " " + text
+                
             coro = self.centry.bot.send_message(self.centry.everyone, text)
             asyncio.ensure_future(coro)
             

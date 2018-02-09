@@ -1,5 +1,7 @@
 #schema
 
+# TODO: Change to serverid
+
 SQLALCHEMY_DATABASE_URI = 'sqlite:///pillbottle.db'
 SQL_DEBUG = False
 
@@ -12,6 +14,7 @@ from sqlalchemy import Column, ForeignKey, Integer, String, Date, Float, Boolean
 
 import asyncio
 import aiocron
+import discord
 
 Base = declarative_base()
 engine = create_engine(SQLALCHEMY_DATABASE_URI, echo=SQL_DEBUG)
@@ -79,7 +82,20 @@ class User(Base, DiscordBase):
     
     async def load_discord(self):
         return await self.bot.get_user_info(self.id)
+        
+class Role(Base, DiscordBase):
+    __tablename__ = 'roles'
     
+    id = Column(String, primary_key=True)
+    name = Column(String, nullable=False)
+    servername = Column(String, nullable=False)
+    
+    async def load_discord(self):
+        server = discord.utils.find(lambda s : s.name == self.servername, self.bot.servers)
+        if server is None:
+            return None
+            
+        return discord.utils.find(lambda r : r.id == self.id, server.roles)
 
 class CronEntry(Base):
     __tablename__ = 'entries'
@@ -91,10 +107,11 @@ class CronEntry(Base):
     timeout = Column(Integer)
     requestcount = Column(Integer)
     echannel = Column("echannel", String, ForeignKey('channels.id'))
+    roleid = Column("roleid", String, ForeignKey("roles.id"))
     cron = Column(String, nullable=False)
     response = Column(String, nullable=False)
     next_run = Column(Float)
-
+    passphrase = Column(String)
     
     @property
     def bot(self):
@@ -111,6 +128,7 @@ class CronEntry(Base):
         self._user = db.query(User).filter_by(id=self.userid).first()
         self._channel = db.query(Channel).filter_by(id=self.channelid).first()
         self._everyone = db.query(Channel).filter_by(id=self.echannel).first()
+        self._role = db.query(Role).filter_by(id=self.roleid).first()
         
         self._user.bot = self._bot
     
@@ -127,6 +145,10 @@ class CronEntry(Base):
         if self._everyone.discord is None:
             self._everyone.bot = self._bot
             await self._everyone.wait_for_discord()
+            
+        if self._role is not None and self._role.discord is None:
+            self._role.bot = self.bot
+            await self._role.wait_for_discord()
         
     def load_dbchannel_by_discord_channel(self, value):
         dbchan = db.query(Channel).filter_by(id=value.id).first()
@@ -145,6 +167,16 @@ class CronEntry(Base):
             
         dbchan._discord = value
         return dbchan
+        
+    def load_dbrole_by_discord_role(self, value):
+        dbrole = db.query(Role).filter_by(id=value.id).first()
+        if dbrole is None:
+            dbrole = Role(id=value.id, name=value.name, servername=value.server.name)
+            db.add(dbrole)
+            db.commit()
+            
+        dbrole._discord = value
+        return dbrole
         
     @property
     def channel(self):
@@ -180,6 +212,23 @@ class CronEntry(Base):
         dbuser._discord = value
         self._user = dbuser
         
+    @property
+    def role(self):
+        try:
+            if self._role is None:
+                return None
+            else:
+                return self._role.discord
+        except AttributeError:
+            return None
+        
+    @role.setter
+    def role(self, value):
+        if value is None:
+            self._role = None
+        else:
+            self._role = self.load_dbrole_by_discord_role(value)
+            self.roleid = value.id
     '''    
     @property
     async def channel(self):

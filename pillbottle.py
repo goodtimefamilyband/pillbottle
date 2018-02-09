@@ -469,6 +469,7 @@ async def settimeout(ctx, entryid, timeout):
     
     await ctx.bot.send_message(ctx.message.channel, "Timeout set")
     
+'''
 @bot.command(pass_context=True, no_pm=False)
 async def notifyeveryone(ctx, entryid):
     
@@ -482,8 +483,46 @@ async def notifyeveryone(ctx, entryid):
         return
         
     entry = entries[entryid]
+'''
     
-   
+@bot.command(pass_context=True, no_pm=True)
+async def setrole(ctx, entryid, *args):
+    entryid = await processEntryId(entryid, ctx)
+    if entryid is None:
+        return
+        
+    dbentry = checkPermissions(entryid, ctx.message.author.id)
+    if dbentry is None:
+        await ctx.bot.send_message(ctx.message.channel, "No entry with that id")
+        return
+        
+    if len(ctx.message.role_mentions) == 0:
+        await ctx.bot.send_message(ctx.message.channel, "Please mention a role to receive extra reminders")
+        return
+        
+    entries[entryid].role = ctx.message.role_mentions[0]
+    db.commit()
+    
+    await ctx.bot.send_message(ctx.message.channel, "Role set")
+
+#TODO: Untested
+@bot.command(pass_context=True, no_pm=False)
+async def setpassphrase(ctx, entryid, *args):
+    entryid = await processEntryId(entryid, ctx)
+    if entryid is None:
+        return
+        
+    dbentry = checkPermissions(entryid, ctx.message.author.id)
+    if dbentry is None:
+        await ctx.bot.send_message(ctx.message.channel, "No entry with that id")
+        return
+    
+    if len(args) == 0:
+        await ctx.bot.send_message(ctx.message.channel, "Passphrase cannot be empty")
+        
+    entries[entryid].passphrase = " ".join(args)
+    db.commit()
+    
 @bot.command(pass_context=True, no_pm=False)
 async def remove(ctx, entryid):
     
