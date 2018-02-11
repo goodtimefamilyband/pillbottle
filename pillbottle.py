@@ -6,10 +6,11 @@ import sched
 import discord
 from discord.ext import commands
 import re
+from sqlalchemy import func
 
 #from pillbottle import getAction
 from pillbottle.classes import RegexChecker, DateChecker, ReminderConvo, SetupConvo
-from pillbottle.schema import Session, CronEntry, Channel, User, db
+from pillbottle.schema import Session, CronEntry, Channel, User, Response, db
 from sqlalchemy.orm import aliased
 
 import sys
@@ -380,26 +381,6 @@ async def setuser(ctx, entryid, *args, **kwargs):
     await ctx.bot.send_message(ctx.message.channel, "User set to {}".format(ctx.message.mentions[0].mention))
     
 @bot.command(pass_context=True, no_pm=False)
-async def setresponse(ctx, entryid, *args, **kwargs):
-    global entries
-    
-    entryid = await processEntryId(entryid, ctx)
-    if entryid is None:
-        return
-        
-    dbentry = checkPermissions(entryid, ctx.message.author.id)
-    if dbentry is None:
-        await ctx.bot.send_message(ctx.message.channel, "You can't change that reminder")
-        return
-    
-    centry = entries[entryid]
-    centry.response = " ".join(args)
-    
-    db.commit()
-    
-    await ctx.bot.send_message(ctx.message.channel, "Response set")
-    
-@bot.command(pass_context=True, no_pm=False)
 async def setmessage(ctx, entryid, *args, **kwargs):
     
     entryid = await processEntryId(entryid, ctx)
@@ -440,6 +421,7 @@ async def settime(ctx, entryid, *args, **kwargs):
     
     crontab = dc.get_crontab()
     entry.cron = crontab
+    entry.next_run = None
     db.commit()
     
     await convos[entryid].cancel()
@@ -523,6 +505,8 @@ async def setpassphrase(ctx, entryid, *args):
     entries[entryid].passphrase = " ".join(args)
     db.commit()
     
+    await ctx.bot.send_message(ctx.message.channel, "Passphrase set")
+    
 @bot.command(pass_context=True, no_pm=False)
 async def remove(ctx, entryid):
     
@@ -545,6 +529,58 @@ async def remove(ctx, entryid):
     del convos[entryid]
     
     await ctx.bot.send_message(ctx.message.channel, "Reminder removed")
+    
+@bot.command(pass_context=True, no_pm=False)
+async def addresponse(ctx, entryid, *args):
+    entryid = await processEntryId(entryid, ctx)
+    if entryid is None:
+        return
+        
+    dbentry = checkPermissions(entryid, ctx.message.author.id)
+    if dbentry is None:
+        await ctx.bot.send_message(ctx.message.channel, "You can't change that item")
+        return
+        
+    (rcount,) = db.query(func.count(Response.id)).filter_by(entryid=entryid).first()
+    db.add(Response(id=rcount+1, entryid=entryid, text=" ".join(args)))
+    db.commit()
+    
+    await ctx.bot.send_message(ctx.message.channel, "Response added")
+    
+@bot.command(pass_context=True, no_pm=False)
+async def responses(ctx, entryid):
+    entryid = await processEntryId(entryid, ctx)
+    if entryid is None:
+        return
+        
+    dbentry = checkPermissions(entryid, ctx.message.author.id)
+    if dbentry is None:
+        await ctx.bot.send_message(ctx.message.channel, "You can't change that item")
+        return
+        
+    responses = db.query(Response).filter_by(entryid=entryid).all()
+    rlist = "\n".join(["{} {}".format(r.id, r.text) for r in responses]) if len(responses) > 0 else "No responses"
+    
+    msg = "```{}```".format(rlist)
+    await ctx.bot.send_message(ctx.message.channel, msg)
+    
+@bot.command(pass_context=True, no_pm=False)
+async def removeresponse(ctx, entryid, responseid):
+    entryid = await processEntryId(entryid, ctx)
+    if entryid is None:
+        return
+        
+    dbentry = checkPermissions(entryid, ctx.message.author.id)
+    if dbentry is None:
+        await ctx.bot.send_message(ctx.message.channel, "You can't change that item")
+        return
+    
+    response = db.query(Response).filter_by(entryid=entryid, id=responseid).first()
+    if response is not None:
+        db.delete(response)
+        db.commit()
+        
+        await ctx.bot.send_message(ctx.message.channel, "Response removed")
     
 print("Running pillbottle...")
 bot.run(token)

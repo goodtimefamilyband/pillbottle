@@ -109,7 +109,6 @@ class CronEntry(Base):
     echannel = Column("echannel", String, ForeignKey('channels.id'))
     roleid = Column("roleid", String, ForeignKey("roles.id"))
     cron = Column(String, nullable=False)
-    response = Column(String, nullable=False)
     next_run = Column(Float)
     passphrase = Column(String)
     
@@ -229,151 +228,13 @@ class CronEntry(Base):
         else:
             self._role = self.load_dbrole_by_discord_role(value)
             self.roleid = value.id
-    '''    
-    @property
-    async def channel(self):
-        
-        try:
-            self._channel = await asyncio.wait_for(self.channel_task, None)
-        except AttributeError:
-            pass
-            
-        return self._channel
-        
-    @channel.setter
-    def channel(self, value):
-        
-        if not asyncio.iscoroutine(value):
-            self._channel = value
-            return
-            
-        try:
-            del self._channel
-        except AttributeError:
-            pass
-            
-        self.channel_task = self.bot.loop.create_task(value)
     
-    @property
-    async def user(self):
-        
-        try:
-            return self._user
-        except AttributeError:
-            pass
-            
-        try:
-            self._user = await asyncio.wait_for(self.user_task, None)
-        except AttributeError:
-            pass
-            
-        return self._user
-        
-    @user.setter
-    def user(self, value):
-        
-        if not asyncio.iscoroutine(value):
-            self._user = value
-            return
-            
-        try:
-            del self._user
-        except AttributeError:
-            pass
-            
-        self.user_task = self.bot.loop.create_task(value)
-        
-        
-    @property
-    async def everyone(self):
-        try:
-            self._everyone = await asyncio.wait_for(self.everyone_task, None)
-        except AttributeError:
-            pass
-            
-        return self._everyone
-        
-    @everyone.setter
-    def everyone(self, value):
-        if not asyncio.iscoroutine(value):
-            self._everyone = value
-            return
-        
-        try:
-            del self._everyone
-        except AttributeError:
-            pass
-            
-        self.everyone_task = self.bot.loop.create_task(value)
-        
-    @hybrid_property
-    def userid(self):
-        return self._userid
-        
-    @userid.setter
-    def userid(self, value):
-        self._userid = value
-        
-        if self.bot is not None:
-            self.user = self.bot.get_user_info(self._userid)
-            
-        
-    @hybrid_property
-    def channelid(self):
-        return self._channelid
-        
-    @channelid.setter
-    def channelid(self, value):
-        self._channelid = value
-        
-        if self.bot is not None:
-            self.channel = self.bot.get_channel(self.channelid)
-            
-    @hybrid_property
-    def echannel(self):
-        return self._echannel
-        
-    @echannel.setter
-    def echannel(self, value):
-        self._echannel = value
-        
-        if self.bot is not None:
-            self.everyone = self.bot.get_channel(self.echannel)
-        
-    async def __call__(self):
-        if self.bot is None:
-            return
-            
-        print("Action")
-        def checkfun(msg1):
-            
-            def check(msg2):
-                print(msg1.author, msg2.author)
-                return msg1.author != msg2.author
-            
-            return check
-        
-        for i in range(self.requestcount):
-            #print(i)
-            channel = await self.channel
-            everyone = await self.everyone
-            message = await self.bot.send_message(channel, self.message)
-            #print(message.channel.id, self.channel.id)
-            reply = await self.bot.wait_for_message(channel=message.channel, timeout=self.timeout, check=checkfun(message))
-            if reply is not None:
-                #print(reply.content)
-                await self.bot.send_message(channel, self.response)
-                return
-              
-        if everyone is not None:
-            await self.bot.send_message(everyone, "@everyone please remind {}: {}".format(channel.mention, self.message))
-            
-    def schedule(self):
-        self.crontab = aiocron.crontab(self.cron, func=self, loop=self.bot.loop)
-        
-    def setChannelAsync(self, future):
-        self._channel = future.result()
-        
-    '''
+class Response(Base):
+    
+    __tablename__ = "responses"
+    
+    id = Column(Integer, primary_key=True)
+    entryid = Column(Integer, ForeignKey('entries.id'), primary_key=True)
+    text = Column(String, nullable=False)
         
 Base.metadata.create_all(engine)

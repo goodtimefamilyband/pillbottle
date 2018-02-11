@@ -1,4 +1,4 @@
-from .schema import CronEntry, Channel, User
+from .schema import CronEntry, Channel, User, Response
 from dateutil import parser
 import asyncio
 import discord
@@ -6,6 +6,8 @@ from croniter import croniter
 import time
 from datetime import datetime
 import pytz
+import random
+from sqlalchemy import func
 
 # to fix a discord bug
 class MessageSender:
@@ -270,7 +272,6 @@ class SetupConvo(Conversation):
         timeout=5, 
         requestcount=3, 
         echannel=self.channel.id, 
-        response="Thank you!",
         cron=cron,
         next_run=citer.get_next(float))
         
@@ -297,7 +298,7 @@ class ReminderQuestion(Question):
         dt = t if self.centry.next_run is None else self.centry.next_run - 1
         self.croniter = croniter(centry.cron, start_time=dt)
         
-        print(t, self.centry.next_run, t - self.centry.next_run)
+        #print(t, self.centry.next_run, t - self.centry.next_run)
         self.centry.next_run = self.croniter.get_next(float)
         while self.centry.next_run < t:
             self.centry.next_run = self.croniter.get_next(float)
@@ -352,7 +353,7 @@ class ReminderQuestion(Question):
         self.croniter.get_next(datetime)
         fut = None
         if not skipped:
-            fut = self.centry.bot.loop.create_task(self.centry.bot.send_message(self.centry.channel, self.centry.response))
+            fut = self.centry.bot.loop.create_task(self.centry.bot.send_message(self.centry.channel, self.next_response()))
             self.reset()
             
         self.timeout = self.centry.next_run - time.time()
@@ -362,6 +363,16 @@ class ReminderQuestion(Question):
         
     def command_check(self, message):
         return not message.content.startswith(self.centry.bot.command_prefix)
+        
+    def next_response(self):
+        (rcount,) = self.db.query(func.count(Response.id)).filter_by(entryid=self.centry.id).first()
+        print(rcount)
+        if rcount < 1:
+            return "Thank you!"
+        
+        id = random.randint(1,rcount)
+        resp = self.db.query(Response).filter_by(entryid=self.centry.id).filter_by(id=id).first()
+        return resp.text
         
     def reset(self):
         self.remaining = self.centry.requestcount
