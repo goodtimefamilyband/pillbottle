@@ -88,10 +88,10 @@ class Role(Base, DiscordBase):
     
     id = Column(String, primary_key=True)
     name = Column(String, nullable=False)
-    servername = Column(String, nullable=False)
+    serverid = Column(String, nullable=False)
     
     async def load_discord(self):
-        server = discord.utils.find(lambda s : s.name == self.servername, self.bot.servers)
+        server = discord.utils.find(lambda s : s.id == self.serverid, self.bot.servers)
         if server is None:
             return None
             
@@ -170,7 +170,7 @@ class CronEntry(Base):
     def load_dbrole_by_discord_role(self, value):
         dbrole = db.query(Role).filter_by(id=value.id).first()
         if dbrole is None:
-            dbrole = Role(id=value.id, name=value.name, servername=value.server.name)
+            dbrole = Role(id=value.id, name=value.name, serverid=value.server.id)
             db.add(dbrole)
             db.commit()
             
