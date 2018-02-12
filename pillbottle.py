@@ -93,24 +93,24 @@ async def on_ready():
         if not entry.id in entries:
             entries[entry.id] = entry
             entry.bot = bot
-            #entry.schedule()
             
-            '''
-            channel = await entry.channel
-            channel = bot.get_channel(channel.id)
-            
-            everyone = await entry.everyone
-            '''
             convos[entry.id] = ReminderConvo(entry, db)
             bot.loop.create_task(convos[entry.id].run())
         
     print(entries)
     
 @bot.command(pass_context=True, no_pm=False)
-async def remind(ctx, *args, **kwargs):
+async def remind(ctx, *msg):
+    '''Create a new reminder
+    
+    Sends the reminder to the channel on which the command was sent. Will ask you a series of questions about the reminder time, where to send additional reminders, etc.
+    
+    msg -- The content of the reminder. Sent to you on the channel you specify
+    '''
+    
     global entries
     
-    message = " ".join(args)
+    message = " ".join(msg)
     user = ctx.message.author
     uchannel = ctx.message.channel
     
@@ -123,28 +123,6 @@ async def remind(ctx, *args, **kwargs):
     convo = SetupConvo(ctx)
     
     await convo.run()
-    
-    '''
-    entry = "{} {} * * *".format(convo.dc.datetime.minute, convo.dc.datetime.hour)
-    
-    uchan = db.query(Channel).filter_by(id=user.id).first()
-    if uchan is None:
-        uchan = Channel(id=ctx.message.author.id, serverid=None)
-        db.add(uchan)
-        
-    echan = db.query(Channel).filter_by(id=convo.channel.id).first()
-    if echan is None:
-        echan = Channel(id=convo.channel.id, serverid=convo.channel.server.id)
-        db.add(echan)
-        
-    centry = CronEntry(channelid=uchan.id, 
-    message=message, 
-    timeout=900, 
-    requestcount=3, 
-    echannel=echan.id, 
-    response="Thank you!",
-    cron=entry)
-    '''
     
     centry = convo.getNewEntry(message, db)     
     centry.bot = ctx.bot
@@ -160,168 +138,14 @@ async def remind(ctx, *args, **kwargs):
     print(convo.dc.datetime)
     print(convo.server)
     print(convo.channel)
-    
-    '''
-    await ctx.bot.send_message(ctx.message.channel, "ok")
-    
-    
-    dc = DateChecker()
-    await ctx.bot.send_message(ctx.message.channel, "Reminders are daily.  What time would you like to be reminded?")
-    reply = await ctx.bot.wait_for_message(author=ctx.message.author, channel=ctx.message.channel, check=dc)
-    
-    if reply is None:
-        return
-    
-    entry = "{} {} * * *".format(dc.datetime.minute, dc.datetime.hour)
-    
-    dest_server = None
-    member = None
-    
-    while dest_server is None:
-        await ctx.bot.send_message(ctx.message.channel, "Which server do you want to notify you for extra reminders?")
-    
-        reply = await ctx.bot.wait_for_message(author=ctx.message.author, channel=ctx.message.channel)
-        dest_server = discord.utils.find(lambda s : s.name == reply.content, ctx.bot.servers)
         
-        if dest_server is None:
-            await ctx.bot.send_message(ctx.message.channel, "I don't have access to {}.".format(reply.content))
-            continue
-                
-        botmember = discord.utils.find(lambda m: m.id == ctx.bot.user.id, dest_server.members)
-        member = discord.utils.find(lambda m : m.id == ctx.message.author.id, dest_server.members)
-        
-        print(type(botmember), type(member))
-        
-        if member is None:
-            dest_server = None
-            await ctx.bot.send_message(ctx.message.channel, "You're not a member of {}.".format(reply.content))
-            continue
-                
-        possible_channels = [channel for channel in dest_server.channels if channel.permissions_for(member).read_messages and channel.permissions_for(botmember).send_messages and channel.type == discord.ChannelType.text]
-        
-        if len(possible_channels) == 0:
-            await ctx.bot.send_message(ctx.message.channel, "You can't read any messages of channels that I can send to in {}...".format(reply.content))
-            dest_server = None
-        else:
-            clist = "\n".join(["{}. {}".format(i, possible_channels[i].name) for i in range(len(possible_channels))])
-            
-            await ctx.bot.send_message(ctx.message.channel, "Select a channel:\n" + clist)
-        
-            reply = await ctx.bot.wait_for_message(channel=ctx.message.channel, 
-            author=ctx.message.author, 
-            check=lambda m : m.content.isdigit() and int(m.content) < len(possible_channels))
-            
-            dest_channel = possible_channels[int(reply.content)]
-            
-            #a = Action(ctx.bot, ctx.message.author, message, everyone=dest_channel)
-            #cron = aiocron.crontab(entry, func=a, loop=ctx.bot.loop)
-            #centry = a.getDbObj(db)
-            
-            uchan = db.query(Channel).filter_by(id=ctx.message.author.id).first()
-            if uchan is None:
-                uchan = Channel(id=ctx.message.author.id, serverid=None)
-                db.add(uchan)
-                
-            echan = db.query(Channel).filter_by(id=dest_channel.id).first()
-            if echan is None:
-                echan = Channel(id=dest_channel.id, serverid=dest_channel.server.id)
-                db.add(echan)
-                
-            centry = CronEntry(channelid=uchan.id, 
-            message=message, 
-            timeout=900, 
-            requestcount=3, 
-            echannel=echan.id, 
-            response="Thank you!",
-            cron=entry)
-            
-            db.add(centry)
-            db.commit()
-            
-            centry.bot = ctx.bot
-            centry.schedule()
-            entries[centry.id] = centry
-            
-            await ctx.bot.send_message(ctx.message.channel, "Reminder set! ({})".format(centry.id))    
-    '''
-
-'''
 @bot.command(pass_context=True, no_pm=False)
-async def set(ctx, *args, **kwargs):
-    message = " ".join(args)
-    check = MessageChecker(qre)
+async def schedule(ctx):
+    '''List all active reminders
     
-    await ctx.bot.send_message(ctx.message.channel, "How often would you like to be reminded?")
-    reply = await ctx.bot.wait_for_message(author=ctx.message.author, channel=ctx.message.channel, check=check)
-    
-    if reply is not None:
-        found = False
-        s,e = check.match.span()
-        freq = reply.content[s:e]
-        tparams = {}
-        
-        for q in qorder[::-1]:
-            
-            if freq == q:
-                found = True
-            
-            #TODO: validate entries
-            if found:
-                await ctx.bot.send_message(ctx.message.channel, qdict[q])
-                reply = await ctx.bot.wait_for_message(author=ctx.message.author, channel=ctx.message.channel)
-                if reply is not None:
-                    tparams[q] = reply.content
-        
-        entry = " ".join([tparams[f] if f in tparams else "*" for f in cronorder])
-        
-        dest_server = None
-        member = None
-        
-        while dest_server is None:
-            await ctx.bot.send_message(ctx.message.channel, "Which server do you want to notify you for extra reminders?")
-        
-            reply = await ctx.bot.wait_for_message(author=ctx.message.author, channel=ctx.message.channel)
-            dest_server = discord.utils.find(lambda s : s.name == reply.content, ctx.bot.servers)
-            
-            if dest_server is None:
-                await ctx.bot.send_message(ctx.message.channel, "I don't have access to {}.".format(reply.content))
-            else:
-                botmember = discord.utils.find(lambda m: m.id == ctx.bot.user.id, dest_server.members)
-                member = discord.utils.find(lambda m : m.id == ctx.message.author.id, dest_server.members)
-                if member is None:
-                    dest_server = None
-                    await ctx.bot.send_message(ctx.message.channel, "You're not a member of {}.".format(reply.content))
-                else:
-                    possible_channels = [channel for channel in dest_server.channels if channel.permissions_for(ctx.message.author).read_messages and channel.permissions_for(botmember).send_messages]
-                    
-                    if len(possible_channels) == 0:
-                        await ctx.bot.send_message(ctx.message.channel, "You can't read any messages of channels that I can send to in {}...".format(reply.content))
-                        dest_server = None
-                    else:
-                        clist = "\n".join(["{}. {}".format(i, possible_channels[i].name) for i in range(len(possible_channels))])
-                        
-                        await ctx.bot.send_message(ctx.message.channel, "Select a channel:\n" + clist)
-                    
-                        reply = await ctx.bot.wait_for_message(channel=ctx.message.channel, 
-                        author=ctx.message.author, 
-                        check=lambda m : m.content.isdigit() and int(m.content) < len(possible_channels))
-                        
-                        dest_channel = possible_channels[int(reply.content)]
-                        
-                        a = Action(ctx.bot, ctx.message.author, message, everyone=dest_channel)
-                        cron = aiocron.crontab(entry, func=a, loop=ctx.bot.loop)
-                        centry = a.getDbObj(db)
-                        centry.cron = entry
-                        db.add(centry)
-                        db.commit()
-                        
-                        entries[centry.id] = {"action": a, "cron": cron}
-                        
-                        await ctx.bot.send_message(ctx.message.channel, "Reminder set! ({})".format(centry.id))
-'''    
-    
-@bot.command(pass_context=True, no_pm=False)
-async def schedule(ctx, *args, **kwargs):
+    When sent in a public channel, lists all reminders active on that server.
+    When sent in a private channel, lists all reminders visible to the user who issued the command.
+    '''
     uchannels = aliased(User)
     echannels = aliased(Channel)
     entrylist = []
@@ -352,7 +176,15 @@ async def schedule(ctx, *args, **kwargs):
     await ctx.bot.send_message(ctx.message.channel, "```Times are in UTC 24-hour format.\n{}```".format(msg))
 
 @bot.command(pass_context=True, no_pm=False)    
-async def setuser(ctx, entryid, *args, **kwargs):
+async def setuser(ctx, entryid, *user):
+    '''Sets the recipient of a reminder.
+    
+    You must include at least one user. Additionally, you may mention a channel to have the initial reminders delivered to that channel.
+    Only the recipient of a reminder may make changes to or delete it. If you set the recipient to someone other than yourself, you will no longer be able to change the reminder.
+    
+    entryid -- The ID of the reminder to change. View reminder IDs with p.schedule
+    user -- A list of mentions containing at least one user and optionally a channel
+    '''
     
     if len(ctx.message.mentions) != 1:
         await ctx.bot.send_message(ctx.message.channel, "Not sure whom to remind...")
@@ -381,7 +213,12 @@ async def setuser(ctx, entryid, *args, **kwargs):
     await ctx.bot.send_message(ctx.message.channel, "User set to {}".format(ctx.message.mentions[0].mention))
     
 @bot.command(pass_context=True, no_pm=False)
-async def setmessage(ctx, entryid, *args, **kwargs):
+async def setmessage(ctx, entryid, *content):
+    '''Sets the content of a reminder
+    
+    entryid -- The ID of the reminder to change. View reminder IDs with p.schedule
+    content -- The new content of the reminder.
+    '''
     
     entryid = await processEntryId(entryid, ctx)
     if entryid is None:
@@ -393,14 +230,21 @@ async def setmessage(ctx, entryid, *args, **kwargs):
         return
     
     entry = entries[entryid]
-    entry.message = " ".join(args)
+    entry.message = " ".join(content)
     
     db.commit()
     
     await ctx.bot.send_message(ctx.message.channel, "Message set")
     
 @bot.command(pass_context=True, no_pm=False)
-async def settime(ctx, entryid, *args, **kwargs):
+async def settime(ctx, entryid, *t):
+    '''Sets the time at which a reminder is issued
+    
+    entryid -- The ID of the reminder to change. View reminder IDs with p.schedule
+    t -- A clock time.  Current default time zone is EST.
+    
+    Other timezones are not currently supported because coding for multiple timezones is annoying.  Support for other timezones may be added in a future release.
+    '''
     
     entryid = await processEntryId(entryid, ctx)
     if entryid is None:
@@ -412,7 +256,7 @@ async def settime(ctx, entryid, *args, **kwargs):
         return
     
     dc = DateChecker()
-    if not dc.checktime(" ".join(args)):
+    if not dc.checktime(" ".join(t)):
         await ctx.bot.send_message("I don't understand the time {}".format(timestr))
         return
     
@@ -432,6 +276,14 @@ async def settime(ctx, entryid, *args, **kwargs):
     
 @bot.command(pass_context=True, no_pm=False)
 async def settimeout(ctx, entryid, timeout):
+    '''Sets how long the bot waits before reminding you again, or reminding others
+    
+    entryid -- The ID of the reminder to change. View reminder IDs with p.schedule
+    timeout -- The length of time (in seconds) before the bot sends another reminder. After three reminders, the bot sends the reminder to a public channel.
+    
+    The default is currently 5 seconds, so you may want to set this higher.
+    '''
+    
     entryid = await processEntryId(entryid, ctx)
     if entryid is None:
         return
@@ -450,25 +302,15 @@ async def settimeout(ctx, entryid, timeout):
     db.commit()
     
     await ctx.bot.send_message(ctx.message.channel, "Timeout set")
-    
-'''
-@bot.command(pass_context=True, no_pm=False)
-async def notifyeveryone(ctx, entryid):
-    
-    entryid = await processEntryId(entryid, ctx)
-    if entryid is None:
-        return
         
-    dbentry = checkPermissions(entryid, ctx.message.author.id)
-    if dbentry is None:
-        await ctx.bot.send_message(ctx.message.channel, "You can't change that reminder")
-        return
-        
-    entry = entries[entryid]
-'''
-    
 @bot.command(pass_context=True, no_pm=True)
-async def setrole(ctx, entryid, *args):
+async def setrole(ctx, entryid, *role):
+    '''Sets a role for the bot to mention when sending public reminders
+    
+    entryid -- The ID of the reminder to change. View reminder IDs with p.schedule
+    role -- A role mention for the bot to use when issuing public reminders
+    '''
+    
     entryid = await processEntryId(entryid, ctx)
     if entryid is None:
         return
@@ -487,9 +329,16 @@ async def setrole(ctx, entryid, *args):
     
     await ctx.bot.send_message(ctx.message.channel, "Role set")
 
-#TODO: Untested
 @bot.command(pass_context=True, no_pm=False)
-async def setpassphrase(ctx, entryid, *args):
+async def setpassphrase(ctx, entryid, *passphrase):
+    '''Sets a pass phrase for the recipient to use when dismissing a reminder
+    
+    The recipient must respond with the given passphrase exactly. All other messages in response to a reminder will be ignored, and the bot will issue additional reminders until it receives a message consists of the exact passphrase set by this command.
+    
+    entryid -- The ID of the reminder to change. View reminder IDs with p.schedule
+    passphrase -- The content a reminder response must contain in order to dismiss it.
+    '''
+
     entryid = await processEntryId(entryid, ctx)
     if entryid is None:
         return
@@ -499,16 +348,20 @@ async def setpassphrase(ctx, entryid, *args):
         await ctx.bot.send_message(ctx.message.channel, "No entry with that id")
         return
     
-    if len(args) == 0:
+    if len(passphrase) == 0:
         await ctx.bot.send_message(ctx.message.channel, "Passphrase cannot be empty")
         
-    entries[entryid].passphrase = " ".join(args)
+    entries[entryid].passphrase = " ".join(passphrase)
     db.commit()
     
     await ctx.bot.send_message(ctx.message.channel, "Passphrase set")
     
 @bot.command(pass_context=True, no_pm=False)
 async def remove(ctx, entryid):
+    '''Removes a reminder
+    
+    entryid -- The ID of the reminder to remove. View reminder IDs with p.schedule
+    '''
     
     entryid = await processEntryId(entryid, ctx)
     if entryid is None:
@@ -531,7 +384,15 @@ async def remove(ctx, entryid):
     await ctx.bot.send_message(ctx.message.channel, "Reminder removed")
     
 @bot.command(pass_context=True, no_pm=False)
-async def addresponse(ctx, entryid, *args):
+async def addresponse(ctx, entryid, *resp):
+    '''Adds a possible response for the bot to give
+    
+    When the user successfully dismisses a reminder, the bot responds with a randomly selected response added via this command.
+    
+    entryid -- The ID of the reminder to change. View reminder IDs with p.schedule
+    resp -- The content of the bot's response. Try words of affirmation
+    '''
+    
     entryid = await processEntryId(entryid, ctx)
     if entryid is None:
         return
@@ -542,13 +403,20 @@ async def addresponse(ctx, entryid, *args):
         return
         
     (rcount,) = db.query(func.count(Response.id)).filter_by(entryid=entryid).first()
-    db.add(Response(id=rcount+1, entryid=entryid, text=" ".join(args)))
+    db.add(Response(id=rcount+1, entryid=entryid, text=" ".join(resp)))
     db.commit()
     
     await ctx.bot.send_message(ctx.message.channel, "Response added")
     
 @bot.command(pass_context=True, no_pm=False)
 async def responses(ctx, entryid):
+    '''List the responses for a given reminder, along with their IDs
+    
+    When the user successfully dismisses a reminder, the bot responds with a response randomly selected from this list.
+    
+    entryid -- The ID of the reminder to list responses for. View reminder IDs with p.schedule
+    '''
+
     entryid = await processEntryId(entryid, ctx)
     if entryid is None:
         return
@@ -566,6 +434,12 @@ async def responses(ctx, entryid):
     
 @bot.command(pass_context=True, no_pm=False)
 async def removeresponse(ctx, entryid, responseid):
+    '''Remove a response
+    
+    entryid -- The ID of the reminder to change. View reminder IDs with p.schedule
+    responseid -- The ID of the response to remove.  View response IDs with p.responses
+    '''
+
     entryid = await processEntryId(entryid, ctx)
     if entryid is None:
         return
