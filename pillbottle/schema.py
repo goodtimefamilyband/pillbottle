@@ -66,6 +66,10 @@ class Channel(Base, DiscordBase):
     serverid = Column(String)
     name = Column(String)
     servername = Column(String)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.user = None
     
     async def load_discord(self):
         channel = self.bot.get_channel(self.id)
