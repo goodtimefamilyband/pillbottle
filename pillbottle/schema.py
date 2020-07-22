@@ -70,7 +70,7 @@ class Channel(Base, DiscordBase):
     async def load_discord(self):
         channel = self.bot.get_channel(self.id)
         if channel is None and self.user is not None:
-            channel = await self.bot.start_private_message(self.user)
+            channel = await self.user.create_dm()
             
         return self.bot.get_channel(self.id)
     

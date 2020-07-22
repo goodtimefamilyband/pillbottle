@@ -203,7 +203,7 @@ async def setuser(ctx, entryid, *user):
     if len(ctx.message.channel_mentions) == 1:
         centry.channel = ctx.message.channel_mentions[0]
     else:
-        centry.channel = await bot.start_private_message(ctx.message.mentions[0])
+        centry.channel = await ctx.message.mentions[0].create_dm()
     
     db.commit()
     await convos[entryid].cancel()
