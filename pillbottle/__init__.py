@@ -10,6 +10,6 @@ async def getAction(entry, bot, eserverid):
     if echannel is None:
         return None
     
-    rchannel = await bot.get_user_info(entry.channelid)
+    rchannel = await bot.fetch_user(entry.channelid)
     
     return Action(bot, rchannel, entry.message, everyone=echannel, requests=entry.requestcount, timeout=entry.timeout, response=entry.response)

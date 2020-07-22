@@ -81,7 +81,7 @@ class User(Base, DiscordBase):
     name = Column(String, nullable=False)
     
     async def load_discord(self):
-        return await self.bot.get_user_info(self.id)
+        return await self.bot.fetch_user(self.id)
         
 class Role(Base, DiscordBase):
     __tablename__ = 'roles'
