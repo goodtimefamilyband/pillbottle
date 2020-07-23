@@ -73,9 +73,10 @@ class Channel(Base, DiscordBase):
     
     async def load_discord(self):
         channel = self.bot.get_channel(self.id)
+
         if channel is None and self.user is not None:
             channel = await self.user.create_dm()
-            
+
         return self.bot.get_channel(self.id)
     
 class User(Base, DiscordBase):
@@ -95,7 +96,7 @@ class Role(Base, DiscordBase):
     serverid = Column(String, nullable=False)
     
     async def load_discord(self):
-        server = discord.utils.find(lambda s : s.id == self.serverid, self.bot.servers)
+        server = discord.utils.find(lambda s : s.id == self.serverid, self.bot.guilds)
         if server is None:
             return None
             
